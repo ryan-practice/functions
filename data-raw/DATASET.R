@@ -3,4 +3,4 @@
 usethis::use_data(traj, overwrite = TRUE)
 usethis::use_data(trbj, overwrite = TRUE)
 usethis::use_data(trav, overwrite = TRUE)
-usethis::use_data(trbj, overwrite = TRUE)
+usethis::use_data(trbv, overwrite = TRUE)
