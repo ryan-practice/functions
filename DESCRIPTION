@@ -1,17 +1,17 @@
 Package: functions
 Type: Package
-Title: What the Package Does (Title Case)
+Title: Personal Functions
 Version: 0.1.0
 Authors@R: c(
     person(
-      "Jane", "Doe",
-      email = "jane@example.com",
+      "Ryan", "Sangston",
+      email = "rms2jg@virginia.edu",
       role = c("aut", "cre")
     )
   )
 Description: More about what it does (maybe more than one line).
     Continuation lines should be indented.
-License: What license is it under?
+License: MIT
 Encoding: UTF-8
 LazyData: true
 Depends: 
