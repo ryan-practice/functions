@@ -12,7 +12,7 @@ resolve_gene(input_gene, chain)
 \item{chain}{"trav", "trbv", "traj", or "trbj"}
 }
 \value{
-A character vector in uppercase.
+the gene that (hopefully) matches our syntax
 }
 \description{
 Verify a gene matches our reference syntax
