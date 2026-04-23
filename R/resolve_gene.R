@@ -2,7 +2,7 @@
 #'
 #' @param input_gene A character vector.
 #' @param chain "trav", "trbv", "traj", or "trbj"
-#' @return A character vector in uppercase.
+#' @return the gene that (hopefully) matches our syntax
 #' @export
 resolve_gene <- function(input_gene, chain){
   if(!(chain %in% c("trav", "trbv", "traj", "trbj"))){
