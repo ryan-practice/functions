@@ -1,6 +1,5 @@
 library(usethis)
 library(data.table)
-library(functions)
 
 traj <- fread(wsl_ify("C:/Users/rms2jg/Documents/early_onboard/TRAJ.csv"), sep = ",")
 traj$Search <- ""
