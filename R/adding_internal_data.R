@@ -41,3 +41,4 @@
 # template_fasta <- paste(template_fasta$`>eBlock template-CDR3s`, collapse = "")
 #
 # usethis::use_data(template_fasta, overwrite = TRUE)
+
