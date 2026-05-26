@@ -19,6 +19,12 @@ resolve_gene <- function(input_gene, chain){
     col_name <- "TRBJ"
   }
   input_gene <- toupper(input_gene)
+  if(input_gene == "TRAJ24*02"){
+    return("TRAJ24*02")
+  }
+  if (input_gene %in% test_chain[[col_name]]) {
+    return(input_gene)
+  }
   resolved_gene <- "unresolved"
   if(!(input_gene %in% test_chain[[col_name]])){
 
@@ -37,8 +43,6 @@ resolve_gene <- function(input_gene, chain){
       resolved_gene <- test_chain[[col_name]][grep(paste0("^", input_gene, "$"), test_chain[[col_name]])]
     }
   }
-  if(input_gene == "TRAJ24*02"){
-    return("TRAJ24*02")
-  }
+
   return(resolved_gene)
 }
