@@ -13,10 +13,6 @@ reduce_similar_tiles <- function(
     verbose = TRUE
 ) {
 
-  # ============================================================
-  # Package checks
-  # ============================================================
-
   if (!requireNamespace("data.table", quietly = TRUE)) {
     stop("Package 'data.table' is required.")
   }
@@ -30,10 +26,6 @@ reduce_similar_tiles <- function(
   }
 
   reduction_method <- match.arg(reduction_method)
-
-  # ============================================================
-  # Sanity checks
-  # ============================================================
 
   if (!inherits(tiles, "data.frame")) {
     stop("'tiles' must be a data.frame, data.table, or tibble-like object.")
@@ -73,13 +65,6 @@ reduce_similar_tiles <- function(
     }
   }
 
-  # ============================================================
-  # Identify protected tiles
-  # ============================================================
-  # Any value other than "no" is considered protected.
-  # By default, NA is treated as protected to avoid accidentally
-  # discarding rows with missing protection labels.
-
   protected_clean <- trimws(tolower(as.character(tiles[[protected_col]])))
 
   if (na_protected) {
@@ -87,10 +72,6 @@ reduce_similar_tiles <- function(
   } else {
     is_protected <- !is.na(protected_clean) & protected_clean != "no"
   }
-
-  # ============================================================
-  # Amino-acid k-mer generation
-  # ============================================================
 
   get_aa_kmers <- function(seq, k) {
     seq <- toupper(as.character(seq))
@@ -107,14 +88,8 @@ reduce_similar_tiles <- function(
   kmers_binary <- lapply(tiles[[tile_col]], get_aa_kmers, k = k)
   kmers_binary <- lapply(kmers_binary, unique)
 
-  # ============================================================
-  # Hashing and sketch generation
-  # ============================================================
-
   hash32 <- function(x) {
     hx <- digest::digest(x, algo = "xxhash32", serialize = FALSE)
-
-    # Use first 7 hex characters, 28 bits, to avoid signed integer overflow.
     as.integer(strtoi(substr(hx, 1, 7), base = 16L))
   }
 
@@ -138,10 +113,6 @@ reduce_similar_tiles <- function(
   sketches <- lapply(kmers_binary, make_sketch, sketch_size = sketch_size)
   sketch_lengths <- lengths(sketches)
 
-  # ============================================================
-  # Invert sketches: hash -> sequence IDs
-  # ============================================================
-
   sk_dt <- data.table::data.table(
     seq_id = rep.int(seq_along(sketches), sketch_lengths),
     h = unlist(sketches, use.names = FALSE)
@@ -158,10 +129,14 @@ reduce_similar_tiles <- function(
 
   } else {
 
-    bucket_sizes <- sk_dt[, .N, by = h]
+    bucket_sizes <- sk_dt[, list(N = .N), by = "h"]
 
-    keep_h <- bucket_sizes[N >= 2L & N <= max_bucket, h]
-    sk_dt2 <- sk_dt[h %in% keep_h]
+    keep_h <- bucket_sizes[["h"]][
+      bucket_sizes[["N"]] >= 2L &
+        bucket_sizes[["N"]] <= max_bucket
+    ]
+
+    sk_dt2 <- sk_dt[sk_dt[["h"]] %in% keep_h]
 
     if (nrow(sk_dt2) == 0L) {
 
@@ -183,7 +158,7 @@ reduce_similar_tiles <- function(
           cmb <- utils::combn(v, 2L)
           data.table::data.table(i = cmb[1L, ], j = cmb[2L, ])
         }
-      }, by = h]
+      }, by = "h"]
 
       if (nrow(pair_hits) == 0L) {
 
@@ -196,25 +171,25 @@ reduce_similar_tiles <- function(
 
       } else {
 
-        pairs <- pair_hits[, .(n_shared_sketch = .N), by = .(i, j)]
+        pairs <- pair_hits[, list(n_shared_sketch = .N), by = c("i", "j")]
 
-        pairs[, j_est := n_shared_sketch /
-                (sketch_lengths[i] + sketch_lengths[j] - n_shared_sketch)]
+        pairs[["j_est"]] <- pairs[["n_shared_sketch"]] /
+          (
+            sketch_lengths[pairs[["i"]]] +
+              sketch_lengths[pairs[["j"]]] -
+              pairs[["n_shared_sketch"]]
+          )
       }
     }
   }
 
-  # ============================================================
-  # Keep likely-similar candidates
-  # ============================================================
-
-  candidates <- pairs[j_est >= candidate_j_est_threshold]
+  candidates <- pairs[pairs[["j_est"]] >= candidate_j_est_threshold]
 
   if (nrow(candidates) > 0L) {
 
     jaccard_scores <- vapply(seq_len(nrow(candidates)), function(idx) {
-      a <- kmers_binary[[candidates$i[idx]]]
-      b <- kmers_binary[[candidates$j[idx]]]
+      a <- kmers_binary[[candidates[["i"]][idx]]]
+      b <- kmers_binary[[candidates[["j"]][idx]]]
 
       union_length <- length(union(a, b))
 
@@ -225,26 +200,18 @@ reduce_similar_tiles <- function(
       length(intersect(a, b)) / union_length
     }, numeric(1))
 
-    candidates[, jac_kmer := jaccard_scores]
+    candidates[["jac_kmer"]] <- jaccard_scores
 
   } else {
 
-    candidates[, jac_kmer := numeric(0)]
+    candidates[["jac_kmer"]] <- numeric(0)
   }
 
-  # ============================================================
-  # Final similar pairs
-  # ============================================================
-
   keep_pairs <- candidates[
-    jac_kmer >= final_jaccard_threshold,
-    .(i, j, jac_kmer)
+    candidates[["jac_kmer"]] >= final_jaccard_threshold,
+    c("i", "j", "jac_kmer"),
+    with = FALSE
   ]
-
-  # ============================================================
-  # Reduction method 1:
-  # Single-linkage connected components
-  # ============================================================
 
   if (reduction_method == "single_linkage") {
 
@@ -255,8 +222,8 @@ reduce_similar_tiles <- function(
     } else {
 
       edge_df <- data.frame(
-        from = as.character(keep_pairs$i),
-        to = as.character(keep_pairs$j)
+        from = as.character(keep_pairs[["i"]]),
+        to = as.character(keep_pairs[["j"]])
       )
 
       vertex_df <- data.frame(
@@ -282,10 +249,8 @@ reduce_similar_tiles <- function(
         protected_in_component <- x[is_protected[x]]
 
         if (length(protected_in_component) > 0L) {
-          # Keep all protected tiles in this similarity component.
           protected_in_component
         } else {
-          # If no protected tiles exist in the component, keep the first tile.
           x[1L]
         }
 
@@ -295,11 +260,6 @@ reduce_similar_tiles <- function(
     }
   }
 
-  # ============================================================
-  # Reduction method 2:
-  # Greedy direct-neighbor filtering
-  # ============================================================
-
   if (reduction_method == "greedy") {
 
     adjacency <- vector("list", n_tiles)
@@ -307,8 +267,8 @@ reduce_similar_tiles <- function(
     if (nrow(keep_pairs) > 0L) {
 
       for (edge_idx in seq_len(nrow(keep_pairs))) {
-        a <- keep_pairs$i[edge_idx]
-        b <- keep_pairs$j[edge_idx]
+        a <- keep_pairs[["i"]][edge_idx]
+        b <- keep_pairs[["j"]][edge_idx]
 
         adjacency[[a]] <- c(adjacency[[a]], b)
         adjacency[[b]] <- c(adjacency[[b]], a)
@@ -319,12 +279,8 @@ reduce_similar_tiles <- function(
 
     keep_tile <- rep(FALSE, n_tiles)
 
-    # Always retain all protected tiles.
     keep_tile[is_protected] <- TRUE
 
-    # Then process unprotected tiles in existing row order.
-    # An unprotected tile is retained only if it is not directly similar
-    # to anything already retained.
     for (idx in seq_len(n_tiles)) {
 
       if (is_protected[idx]) {
@@ -342,10 +298,6 @@ reduce_similar_tiles <- function(
 
     rep_indices <- which(keep_tile)
   }
-
-  # ============================================================
-  # Final output
-  # ============================================================
 
   removed_indices <- setdiff(seq_len(n_tiles), rep_indices)
 
