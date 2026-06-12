@@ -1,13 +1,106 @@
+#' Tile an amino acid sequence into overlapping peptide tiles
+#'
+#' Creates peptide tiles from a single amino acid sequence using two tiling tracks:
+#' one starting at position 1 and one starting at `offset + 1`. If the sequence
+#' ends with partial-length tiles, the function marks those partial tiles as
+#' `gets_replaced = "yes"` and adds a full-length terminal replacement tile.
+#'
+#' For sequences shorter than `tile_size`, the function returns the original
+#' short sequence and a repeated/padded version expanded to `tile_size`.
+#'
+#' @param aa_seq Character string. Amino acid sequence to tile.
+#' @param identifier Character string. Identifier to assign to the output
+#'   `cluster_id` column.
+#' @param tile_size Integer. Desired peptide tile length.
+#' @param offset Integer. Offset for the second tiling track. For example, with
+#'   `tile_size = 90` and `offset = 45`, the second track starts at amino acid 46.
+#' @param keep_partial Logical. Currently unused. Reserved for future behavior
+#'   controlling whether partial tiles are retained.
+#' @param return_df Logical. Currently unused. Reserved for future output options.
+#' @param metadata Optional metadata to append to every output tile. May be
+#'   `NULL`, a named list, a named vector, or a one-row data frame. Metadata
+#'   column names must not duplicate existing output column names.
+#'
+#' @return A data frame with one row per tile. Core columns include:
+#' \describe{
+#'   \item{cluster_id}{Identifier supplied by `identifier`.}
+#'   \item{start}{Start coordinate of the tile in the input sequence.}
+#'   \item{end}{End coordinate of the tile in the input sequence.}
+#'   \item{tile_seq}{Amino acid sequence of the tile.}
+#'   \item{tile_length}{Length of `tile_seq`.}
+#'   \item{padded}{Whether the tile was added as a padded/replacement tile.}
+#'   \item{n_pad_aa}{Number of amino acids added or effectively recovered.}
+#'   \item{gets_replaced}{Whether this partial tile is intended to be replaced
+#'     by a full-length terminal tile.}
+#' }
+#'
+#' If `metadata` is supplied, its fields are appended as additional columns.
+#'
+#' @examples
+#' tile_aa(
+#'   aa_seq = "MTEYKLVVVGAGGVGKSALTIQLIQNHFVDEYDPTIEDSYRKQV",
+#'   identifier = "seq_001",
+#'   tile_size = 15,
+#'   offset = 7
+#' )
+#'
+#' tile_aa(
+#'   aa_seq = "MTEYKLVVVGAGGVGKSALTIQLIQNHFVDEYDPTIEDSYRKQV",
+#'   identifier = "seq_001",
+#'   tile_size = 15,
+#'   offset = 7,
+#'   metadata = list(
+#'     source_file = "HERV_orfs_aa_sequences_v3.fasta",
+#'     protein_type = "ORF",
+#'     domain_hit = "Gag"
+#'   )
+#' )
+#'
+#' @export
 tile_aa <- function(
     aa_seq,
     identifier,
     tile_size,
     offset,
-    keep_partial = TRUE,
-    return_df = TRUE
+    metadata = NULL
 ){
   full_tiling <- NULL
   aa_seq <- toupper(aa_seq)
+  add_metadata <- function(df, metadata) {
+    if (is.null(metadata)) {
+      return(df)
+    }
+
+    if (is.vector(metadata) && !is.list(metadata)) {
+      metadata <- as.list(metadata)
+    }
+
+    if (is.list(metadata) && !is.data.frame(metadata)) {
+      metadata <- as.data.frame(metadata, stringsAsFactors = FALSE)
+    }
+
+    if (!is.data.frame(metadata)) {
+      stop("metadata must be NULL, a named list, a named vector, or a one-row data.frame")
+    }
+
+    if (nrow(metadata) != 1) {
+      stop("metadata must contain exactly one row/value per metadata field")
+    }
+
+    if (any(names(metadata) %in% names(df))) {
+      stop(
+        paste0(
+          "metadata contains column names already used by tile_aa(): ",
+          paste(intersect(names(metadata), names(df)), collapse = ", ")
+        )
+      )
+    }
+
+    cbind(
+      df,
+      metadata[rep(1, nrow(df)), , drop = FALSE]
+    )
+  }
 
   if(nchar(aa_seq) < tile_size){
     full_tiling <- data.frame("cluster_id" = identifier,
@@ -72,7 +165,15 @@ tile_aa <- function(
 
     if(any(unique(full_tiling$tile_length) != tile_size)){
       if(length(unique(full_tiling$tile_length)) != 3){
-        warning(paste0(length(unique(full_tiling$tile_length)), " is equal to ", length(unique(full_tiling$tile_length)), ". Currently code should handle length 2 or 3 properly"))
+        warning(
+          paste0(
+            "Found ",
+            length(unique(full_tiling$tile_length)),
+            " unique tile lengths: ",
+            paste(sort(unique(full_tiling$tile_length)), collapse = ", "),
+            ". Current code is designed to handle 2 or 3 unique tile lengths."
+          )
+        )
       }
       if(length(unique(full_tiling$tile_length)) == 2){
         tile_to_replace <- full_tiling[which(full_tiling$tile_length != tile_size & full_tiling$tile_length == min(unique(full_tiling$tile_length))),]
@@ -110,5 +211,6 @@ tile_aa <- function(
     )
   }
 
+  full_tiling <- add_metadata(full_tiling, metadata)
   return(full_tiling)
 }
