@@ -13,10 +13,6 @@ reduce_similar_tiles <- function(
     verbose = TRUE
 ) {
 
-  if (!requireNamespace("data.table", quietly = TRUE)) {
-    stop("Package 'data.table' is required.")
-  }
-
   if (!requireNamespace("digest", quietly = TRUE)) {
     stop("Package 'digest' is required.")
   }
@@ -51,6 +47,8 @@ reduce_similar_tiles <- function(
         similar_pairs = data.frame(),
         candidates = data.frame(),
         settings = list(
+          tile_col = tile_col,
+          protected_col = protected_col,
           k = k,
           sketch_size = sketch_size,
           candidate_j_est_threshold = candidate_j_est_threshold,
@@ -113,14 +111,12 @@ reduce_similar_tiles <- function(
   sketches <- lapply(kmers_binary, make_sketch, sketch_size = sketch_size)
   sketch_lengths <- lengths(sketches)
 
-  sk_dt <- data.table::data.table(
-    seq_id = rep.int(seq_along(sketches), sketch_lengths),
-    h = unlist(sketches, use.names = FALSE)
-  )
+  seq_id_vec <- rep.int(seq_along(sketches), sketch_lengths)
+  h_vec <- unlist(sketches, use.names = FALSE)
 
-  if (nrow(sk_dt) == 0L) {
+  if (length(h_vec) == 0L) {
 
-    pairs <- data.table::data.table(
+    pairs <- data.frame(
       i = integer(),
       j = integer(),
       n_shared_sketch = integer(),
@@ -129,18 +125,15 @@ reduce_similar_tiles <- function(
 
   } else {
 
-    bucket_sizes <- sk_dt[, list(N = .N), by = "h"]
+    unique_h <- unique(h_vec)
+    h_group <- match(h_vec, unique_h)
+    bucket_n <- tabulate(h_group, nbins = length(unique_h))
 
-    keep_h <- bucket_sizes[["h"]][
-      bucket_sizes[["N"]] >= 2L &
-        bucket_sizes[["N"]] <= max_bucket
-    ]
+    keep_groups <- which(bucket_n >= 2L & bucket_n <= max_bucket)
 
-    sk_dt2 <- sk_dt[sk_dt[["h"]] %in% keep_h]
+    if (length(keep_groups) == 0L) {
 
-    if (nrow(sk_dt2) == 0L) {
-
-      pairs <- data.table::data.table(
+      pairs <- data.frame(
         i = integer(),
         j = integer(),
         n_shared_sketch = integer(),
@@ -149,20 +142,30 @@ reduce_similar_tiles <- function(
 
     } else {
 
-      pair_hits <- sk_dt2[, {
-        v <- sort(unique(seq_id))
+      keep_rows <- h_group %in% keep_groups
+
+      bucket_list <- split(
+        seq_id_vec[keep_rows],
+        h_group[keep_rows],
+        drop = TRUE
+      )
+
+      pair_keys_list <- lapply(bucket_list, function(v) {
+        v <- sort(unique(v))
 
         if (length(v) < 2L) {
-          data.table::data.table(i = integer(), j = integer())
-        } else {
-          cmb <- utils::combn(v, 2L)
-          data.table::data.table(i = cmb[1L, ], j = cmb[2L, ])
+          return(character(0))
         }
-      }, by = "h"]
 
-      if (nrow(pair_hits) == 0L) {
+        cmb <- utils::combn(v, 2L)
+        paste(cmb[1L, ], cmb[2L, ], sep = "\t")
+      })
 
-        pairs <- data.table::data.table(
+      pair_keys <- unlist(pair_keys_list, use.names = FALSE)
+
+      if (length(pair_keys) == 0L) {
+
+        pairs <- data.frame(
           i = integer(),
           j = integer(),
           n_shared_sketch = integer(),
@@ -171,25 +174,42 @@ reduce_similar_tiles <- function(
 
       } else {
 
-        pairs <- pair_hits[, list(n_shared_sketch = .N), by = c("i", "j")]
+        pair_tab <- table(pair_keys)
+        pair_split <- strsplit(names(pair_tab), "\t", fixed = TRUE)
+        pair_mat <- matrix(
+          as.integer(unlist(pair_split, use.names = FALSE)),
+          ncol = 2,
+          byrow = TRUE
+        )
 
-        pairs[["j_est"]] <- pairs[["n_shared_sketch"]] /
+        pairs <- data.frame(
+          i = pair_mat[, 1],
+          j = pair_mat[, 2],
+          n_shared_sketch = as.integer(pair_tab),
+          stringsAsFactors = FALSE
+        )
+
+        pairs$j_est <- pairs$n_shared_sketch /
           (
-            sketch_lengths[pairs[["i"]]] +
-              sketch_lengths[pairs[["j"]]] -
-              pairs[["n_shared_sketch"]]
+            sketch_lengths[pairs$i] +
+              sketch_lengths[pairs$j] -
+              pairs$n_shared_sketch
           )
       }
     }
   }
 
-  candidates <- pairs[pairs[["j_est"]] >= candidate_j_est_threshold]
+  candidates <- pairs[
+    pairs$j_est >= candidate_j_est_threshold,
+    ,
+    drop = FALSE
+  ]
 
   if (nrow(candidates) > 0L) {
 
     jaccard_scores <- vapply(seq_len(nrow(candidates)), function(idx) {
-      a <- kmers_binary[[candidates[["i"]][idx]]]
-      b <- kmers_binary[[candidates[["j"]][idx]]]
+      a <- kmers_binary[[candidates$i[idx]]]
+      b <- kmers_binary[[candidates$j[idx]]]
 
       union_length <- length(union(a, b))
 
@@ -200,17 +220,17 @@ reduce_similar_tiles <- function(
       length(intersect(a, b)) / union_length
     }, numeric(1))
 
-    candidates[["jac_kmer"]] <- jaccard_scores
+    candidates$jac_kmer <- jaccard_scores
 
   } else {
 
-    candidates[["jac_kmer"]] <- numeric(0)
+    candidates$jac_kmer <- numeric(0)
   }
 
   keep_pairs <- candidates[
-    candidates[["jac_kmer"]] >= final_jaccard_threshold,
+    candidates$jac_kmer >= final_jaccard_threshold,
     c("i", "j", "jac_kmer"),
-    with = FALSE
+    drop = FALSE
   ]
 
   if (reduction_method == "single_linkage") {
@@ -222,12 +242,14 @@ reduce_similar_tiles <- function(
     } else {
 
       edge_df <- data.frame(
-        from = as.character(keep_pairs[["i"]]),
-        to = as.character(keep_pairs[["j"]])
+        from = as.character(keep_pairs$i),
+        to = as.character(keep_pairs$j),
+        stringsAsFactors = FALSE
       )
 
       vertex_df <- data.frame(
-        name = as.character(seq_len(n_tiles))
+        name = as.character(seq_len(n_tiles)),
+        stringsAsFactors = FALSE
       )
 
       g <- igraph::graph_from_data_frame(
@@ -267,8 +289,8 @@ reduce_similar_tiles <- function(
     if (nrow(keep_pairs) > 0L) {
 
       for (edge_idx in seq_len(nrow(keep_pairs))) {
-        a <- keep_pairs[["i"]][edge_idx]
-        b <- keep_pairs[["j"]][edge_idx]
+        a <- keep_pairs$i[edge_idx]
+        b <- keep_pairs$j[edge_idx]
 
         adjacency[[a]] <- c(adjacency[[a]], b)
         adjacency[[b]] <- c(adjacency[[b]], a)
@@ -323,8 +345,8 @@ reduce_similar_tiles <- function(
       removed_tiles = removed_tiles,
       retained_indices = rep_indices,
       removed_indices = removed_indices,
-      similar_pairs = as.data.frame(keep_pairs),
-      candidates = as.data.frame(candidates),
+      similar_pairs = keep_pairs,
+      candidates = candidates,
       is_protected = is_protected,
       settings = list(
         tile_col = tile_col,
