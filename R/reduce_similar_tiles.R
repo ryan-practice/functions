@@ -1,3 +1,95 @@
+#' Reduce peptide tiles by k-mer similarity
+#'
+#' Reduces a peptide tile table by identifying highly similar peptide sequences
+#' using amino-acid k-mer Jaccard similarity. The function first uses a compact
+#' hash-sketching step to identify likely similar candidate pairs, then computes
+#' exact k-mer Jaccard similarity only for those candidates.
+#'
+#' Protected tiles are always retained. Protection status is determined from the
+#' column specified by `protected_col`. Any value other than `"no"` is treated as
+#' protected. By default, missing protection values are also treated as protected
+#' to avoid accidentally discarding tiles with missing labels.
+#'
+#' @param tiles A data frame, data table, or tibble containing peptide tile
+#'   sequences and a protection-status column.
+#' @param tile_col Character string. Name of the column containing peptide
+#'   sequences. Default is `"tile_seq"`.
+#' @param protected_col Character string. Name of the column indicating whether
+#'   a tile is protected. Default is `"protected"`.
+#' @param k Integer. Amino-acid k-mer size used for similarity comparison.
+#'   Default is `6`.
+#' @param sketch_size Integer. Number of smallest k-mer hashes retained per tile
+#'   during sketching. Larger values may improve recall but can increase runtime.
+#'   Default is `50`.
+#' @param candidate_j_est_threshold Numeric. Minimum approximate sketch-based
+#'   Jaccard similarity required for a pair to be evaluated using exact k-mer
+#'   Jaccard similarity. Default is `0.55`.
+#' @param final_jaccard_threshold Numeric. Minimum exact k-mer Jaccard similarity
+#'   required for two tiles to be considered similar or redundant. Default is
+#'   `0.70`.
+#' @param max_bucket Integer. Maximum number of tiles allowed to share a sketch
+#'   hash before that hash is ignored during candidate-pair generation. This
+#'   prevents very common hashes from generating excessive candidate pairs.
+#'   Default is `200L`.
+#' @param reduction_method Character string. Similarity reduction strategy.
+#'   Options are `"single_linkage"` and `"greedy"`. Default is
+#'   `"single_linkage"`.
+#' @param na_protected Logical. If `TRUE`, missing values in `protected_col` are
+#'   treated as protected. If `FALSE`, missing values are treated as unprotected.
+#'   Default is `TRUE`.
+#' @param return_details Logical. If `FALSE`, return only the reduced tile table.
+#'   If `TRUE`, return a list with the reduced table, removed table, retained
+#'   indices, removed indices, similar pairs, candidate pairs, protection flags,
+#'   and settings. Default is `FALSE`.
+#' @param verbose Logical. If `TRUE`, print a short filtering summary. Default is
+#'   `TRUE`.
+#'
+#' @details
+#' Each peptide sequence is converted into a set of unique overlapping amino-acid
+#' k-mers. These k-mers are hashed, and the smallest `sketch_size` hash values
+#' are retained as a compact sketch for each tile. Pairs of tiles that share
+#' sketch hashes are used as candidate pairs. Exact k-mer Jaccard similarity is
+#' then calculated only for those candidate pairs.
+#'
+#' In `"single_linkage"` mode, similar tiles are represented as an undirected
+#' graph. Connected components of similar tiles are reduced together. All
+#' protected tiles in each component are retained. If a component contains no
+#' protected tiles, the first tile in that component is retained.
+#'
+#' In `"greedy"` mode, all protected tiles are retained first. Unprotected tiles
+#' are then processed in their existing row order. An unprotected tile is retained
+#' only if it is not directly similar to any tile already retained. This avoids
+#' the transitive chaining behavior of single-linkage clustering.
+#'
+#' @return
+#' If `return_details = FALSE`, returns the retained tile table.
+#'
+#' If `return_details = TRUE`, returns a list containing the retained tile table,
+#' removed tile table, retained row indices, removed row indices, final similar
+#' tile pairs, candidate tile pairs, logical protection flags, and parameter
+#' settings used for the run.
+#'
+#' @examples
+#' \dontrun{
+#' complete_tiles_sim_reduced <- reduce_similar_tiles(complete_tiles)
+#'
+#' complete_tiles_sim_reduced_greedy <- reduce_similar_tiles(
+#'   complete_tiles,
+#'   reduction_method = "greedy"
+#' )
+#'
+#' sim_result <- reduce_similar_tiles(
+#'   complete_tiles,
+#'   reduction_method = "single_linkage",
+#'   return_details = TRUE
+#' )
+#'
+#' complete_tiles_sim_reduced <- sim_result$reduced_tiles
+#' complete_tiles_sim_removed <- sim_result$removed_tiles
+#' keep_pairs <- sim_result$similar_pairs
+#' }
+#'
+#' @export
 reduce_similar_tiles <- function(
     tiles,
     tile_col = "tile_seq",
