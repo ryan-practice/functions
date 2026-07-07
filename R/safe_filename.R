@@ -1,0 +1,33 @@
+#' Create a filesystem-safe filename
+#'
+#' Converts an arbitrary character string into a safer filename by replacing
+#' characters outside of letters, numbers, periods, underscores, and hyphens
+#' with underscores. This helper is useful when writing CDR3 safety-check plots
+#' or other per-TCR output files using user-provided TCR identifiers.
+#'
+#' @param x Character vector containing one or more proposed file names or file
+#'   name stems.
+#'
+#' @return A character vector of sanitized file name stems. Empty results are
+#'   replaced with `"unnamed_tcr"`.
+#'
+#' @details
+#' This function is intended to prevent file-writing errors caused by spaces,
+#' slashes, colons, or other characters that may be invalid or inconvenient in
+#' file paths. It does not add a file extension; append extensions such as
+#' `".png"` or `".fasta"` after calling this function.
+#'
+#' @examples
+#' safe_filename("TCR 1")
+#' safe_filename("clone/A:B")
+#' safe_filename(c("TCR 1", "clone/A:B", ""))
+#'
+#' @export
+safe_filename <- function(x) {
+  x <- as.character(x)
+  x <- gsub("[^A-Za-z0-9._-]+", "_", x)
+  x <- gsub("_+", "_", x)
+  x <- gsub("^_|_$", "", x)
+
+  ifelse(nzchar(x), x, "unnamed_tcr")
+}
