@@ -65,6 +65,10 @@ No duplicate chain records are removed. Identical input rows are retained
 and participate independently in the Cartesian pairing. This allows
 duplicate detection or filtering to be performed downstream.
 
+The output preserves the order in which identifiers first appear in the
+input table. Within each identifier, TRA and TRB records retain their
+original relative input order.
+
 Columns originating from TRA rows are prefixed with `"TRA_"`, while columns
 originating from TRB rows are prefixed with `"TRB_"`. The identifier column
 remains unprefixed.
@@ -73,6 +77,10 @@ remains unprefixed.
 Pairing is performed with a many-to-many join on the identifier column.
 Therefore, if an identifier has \eqn{a} TRA rows and \eqn{b} TRB rows, the
 output contains \eqn{a \times b} rows for that identifier.
+
+Identifier groups are returned according to the order in which each
+identifier first appears in `airr_data`; identifiers are not sorted
+alphabetically.
 
 The chain counts describe the number of raw TRA and TRB input rows, not the
 number of unique biological sequences. For example, two identical TRA rows
@@ -89,11 +97,11 @@ Rows whose locus is neither TRA nor TRB are ignored with a warning.
 \examples{
 airr_example <- tibble::tribble(
   ~cell_id, ~locus, ~v_call,       ~j_call,      ~junction_aa,
+  "cell_2", "TRA",  "TRAV1-2*01",  "TRAJ33*01",  "CAVRDSNYQLIW",
+  "cell_2", "TRB",  "TRBV6-5*01",  "TRBJ1-2*01", "CASSYRGGNTIYF",
   "cell_1", "TRA",  "TRAV12-2*01", "TRAJ27*01",  "CAVRDTNTNAGKSTF",
   "cell_1", "TRA",  "TRAV8-4*01",  "TRAJ42*01",  "CAVSDGGSQGNLIF",
-  "cell_1", "TRB",  "TRBV7-9*01",  "TRBJ2-5*01", "CASSLGQETQYF",
-  "cell_2", "TRA",  "TRAV1-2*01",  "TRAJ33*01",  "CAVRDSNYQLIW",
-  "cell_2", "TRB",  "TRBV6-5*01",  "TRBJ1-2*01", "CASSYRGGNTIYF"
+  "cell_1", "TRB",  "TRBV7-9*01",  "TRBJ2-5*01", "CASSLGQETQYF"
 )
 
 paired_tcr <- airr_to_paired_tcr(airr_example)

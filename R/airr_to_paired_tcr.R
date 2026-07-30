@@ -12,6 +12,10 @@
 #' and participate independently in the Cartesian pairing. This allows
 #' duplicate detection or filtering to be performed downstream.
 #'
+#' The output preserves the order in which identifiers first appear in the
+#' input table. Within each identifier, TRA and TRB records retain their
+#' original relative input order.
+#'
 #' Columns originating from TRA rows are prefixed with `"TRA_"`, while columns
 #' originating from TRB rows are prefixed with `"TRB_"`. The identifier column
 #' remains unprefixed.
@@ -57,6 +61,10 @@
 #' Therefore, if an identifier has \eqn{a} TRA rows and \eqn{b} TRB rows, the
 #' output contains \eqn{a \times b} rows for that identifier.
 #'
+#' Identifier groups are returned according to the order in which each
+#' identifier first appears in `airr_data`; identifiers are not sorted
+#' alphabetically.
+#'
 #' The chain counts describe the number of raw TRA and TRB input rows, not the
 #' number of unique biological sequences. For example, two identical TRA rows
 #' and one TRB row produce:
@@ -72,11 +80,11 @@
 #' @examples
 #' airr_example <- tibble::tribble(
 #'   ~cell_id, ~locus, ~v_call,       ~j_call,      ~junction_aa,
+#'   "cell_2", "TRA",  "TRAV1-2*01",  "TRAJ33*01",  "CAVRDSNYQLIW",
+#'   "cell_2", "TRB",  "TRBV6-5*01",  "TRBJ1-2*01", "CASSYRGGNTIYF",
 #'   "cell_1", "TRA",  "TRAV12-2*01", "TRAJ27*01",  "CAVRDTNTNAGKSTF",
 #'   "cell_1", "TRA",  "TRAV8-4*01",  "TRAJ42*01",  "CAVSDGGSQGNLIF",
-#'   "cell_1", "TRB",  "TRBV7-9*01",  "TRBJ2-5*01", "CASSLGQETQYF",
-#'   "cell_2", "TRA",  "TRAV1-2*01",  "TRAJ33*01",  "CAVRDSNYQLIW",
-#'   "cell_2", "TRB",  "TRBV6-5*01",  "TRBJ1-2*01", "CASSYRGGNTIYF"
+#'   "cell_1", "TRB",  "TRBV7-9*01",  "TRBJ2-5*01", "CASSLGQETQYF"
 #' )
 #'
 #' paired_tcr <- airr_to_paired_tcr(airr_example)
@@ -140,9 +148,11 @@ airr_to_paired_tcr <- function(
     )
   }
 
-  if (!is.logical(include_unpaired) ||
-      length(include_unpaired) != 1L ||
-      is.na(include_unpaired)) {
+  if (
+    !is.logical(include_unpaired) ||
+    length(include_unpaired) != 1L ||
+    is.na(include_unpaired)
+  ) {
     stop(
       "`include_unpaired` must be either TRUE or FALSE.",
       call. = FALSE
@@ -189,6 +199,14 @@ airr_to_paired_tcr <- function(
 
   airr_data <- tibble::as_tibble(airr_data)
 
+  # Record the order in which identifiers first appear in the input.
+  #
+  # Character conversion is used only for matching positions. The identifier
+  # column in the returned data retains its original type.
+  original_id_order <- unique(
+    as.character(airr_data[[id_col]])
+  )
+
   #-----------------------------
   # 2. Validate identifiers
   #-----------------------------
@@ -233,7 +251,9 @@ airr_to_paired_tcr <- function(
   }
 
   chain_data <- airr_data |>
-    dplyr::filter(.data[[locus_col]] %in% c("TRA", "TRB"))
+    dplyr::filter(
+      .data[[locus_col]] %in% c("TRA", "TRB")
+    )
 
   if (nrow(chain_data) == 0L) {
     stop(
@@ -266,7 +286,9 @@ airr_to_paired_tcr <- function(
   )
 
   incomplete_ids <- chain_count_table |>
-    dplyr::filter(n_TRA == 0L | n_TRB == 0L)
+    dplyr::filter(
+      n_TRA == 0L | n_TRB == 0L
+    )
 
   if (!include_unpaired && nrow(incomplete_ids) > 0L) {
     warning(
@@ -288,13 +310,19 @@ airr_to_paired_tcr <- function(
   #-----------------------------
 
   tra_data <- chain_data |>
-    dplyr::filter(.data[[locus_col]] == "TRA") |>
+    dplyr::filter(
+      .data[[locus_col]] == "TRA"
+    ) |>
     dplyr::rename_with(
-      function(column_name) paste0("TRA_", column_name),
+      function(column_name) {
+        paste0("TRA_", column_name)
+      },
       .cols = -dplyr::all_of(id_col)
     ) |>
     dplyr::group_by(.data[[id_col]]) |>
-    dplyr::mutate(.TRA_input_row = dplyr::row_number()) |>
+    dplyr::mutate(
+      .TRA_input_row = dplyr::row_number()
+    ) |>
     dplyr::ungroup()
 
   #-----------------------------
@@ -302,13 +330,19 @@ airr_to_paired_tcr <- function(
   #-----------------------------
 
   trb_data <- chain_data |>
-    dplyr::filter(.data[[locus_col]] == "TRB") |>
+    dplyr::filter(
+      .data[[locus_col]] == "TRB"
+    ) |>
     dplyr::rename_with(
-      function(column_name) paste0("TRB_", column_name),
+      function(column_name) {
+        paste0("TRB_", column_name)
+      },
       .cols = -dplyr::all_of(id_col)
     ) |>
     dplyr::group_by(.data[[id_col]]) |>
-    dplyr::mutate(.TRB_input_row = dplyr::row_number()) |>
+    dplyr::mutate(
+      .TRB_input_row = dplyr::row_number()
+    ) |>
     dplyr::ungroup()
 
   #-----------------------------
@@ -341,7 +375,8 @@ airr_to_paired_tcr <- function(
   }
 
   #-----------------------------
-  # 8. Add metadata and TCR IDs
+  # 8. Restore original ID order
+  #    and add TCR IDs
   #-----------------------------
 
   paired_data <- paired_data |>
@@ -349,13 +384,21 @@ airr_to_paired_tcr <- function(
       output_metadata,
       by = id_col
     ) |>
+    dplyr::mutate(
+      .original_id_position = match(
+        as.character(.data[[id_col]]),
+        original_id_order
+      )
+    ) |>
     dplyr::arrange(
-      .data[[id_col]],
+      .original_id_position,
       .TRA_input_row,
       .TRB_input_row
     ) |>
     dplyr::group_by(.data[[id_col]]) |>
-    dplyr::mutate(.tcr_number = dplyr::row_number()) |>
+    dplyr::mutate(
+      .tcr_number = dplyr::row_number()
+    ) |>
     dplyr::ungroup()
 
   maximum_tcr_number <- max(
@@ -392,7 +435,8 @@ airr_to_paired_tcr <- function(
         c(
           ".TRA_input_row",
           ".TRB_input_row",
-          ".tcr_number"
+          ".tcr_number",
+          ".original_id_position"
         )
       )
     )
